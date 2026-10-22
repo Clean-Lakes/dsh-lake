@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/Clean-Lakes/Lake.git",
+  "branch": "develop",
+  "commit": "89a02c6c85d972c70579a14e238bac80be281fbb",
+  "version": "0.3.21",
+  "sourceDirectory": "upstream/lake",
+  "sourcePolicy": "Unmodified git archive of the pinned develop commit. Integration code lives outside this directory."
+}

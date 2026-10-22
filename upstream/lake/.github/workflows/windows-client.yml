@@ -1,0 +1,151 @@
+name: Windows x86_64 client
+on:
+  workflow_dispatch:
+    inputs:
+      p8_resume:
+        description: 'Only retry P8 failed/uncompleted acceptance; prior native backend checks already passed'
+        required: false
+        default: false
+        type: boolean
+      p8_checks:
+        description: 'Select failed P8 checks to retry; results from other runs remain separate evidence'
+        required: false
+        default: all
+        type: choice
+        options: [all, contracts-ai, native-ui-only]
+  pull_request:
+    branches: [master]
+    paths: ['client/windows/**', 'internal/**', 'cmd/lake/**', 'scripts/build_lake_windows.py', 'scripts/verify_strategy_learning.py', 'web-agent/**', 'go.mod', 'go.sum', '.github/workflows/windows-client.yml']
+permissions:
+  contents: read
+jobs:
+  windows-amd64:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.ref == 'develop' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.6'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: pnpm --dir web-agent install --frozen-lockfile
+      - run: pnpm --dir web-agent test:frontend
+        if: ${{ !inputs.p8_resume }}
+      - run: pnpm --dir web-agent build:web
+      - run: choco install nsis 7zip --no-progress -y
+      - name: Prepare pinned terminal runtime before packaging
+        shell: python
+        run: |
+          import json, os, pathlib, runpy, shutil
+          build = runpy.run_path('scripts/build_lake_windows.py')
+          shutil.copytree('web-agent/web/dist', 'assets/web/dist', dirs_exist_ok=True)
+          lock = json.loads(pathlib.Path('client/windows/runtime-lock.json').read_text())
+          cache = pathlib.Path.home() / '.cache/lake/windows-build'
+          cache.mkdir(parents=True, exist_ok=True)
+          archive = cache / (lock['sha256'] + '.7z.exe')
+          build['download'](lock['url'], archive, lock['sha256'])
+          seven = build['tool']('7zz', [shutil.which('7z') or '', 'C:/Program Files/7-Zip/7z.exe'])
+          runtime = pathlib.Path(os.environ['RUNNER_TEMP']) / 'lake-conpty-runtime'
+          build['run']([seven, 'x', '-y', '-o' + str(runtime), archive])
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('LAKE_PORTABLE_ROOT=' + str(runtime) + '\n')
+      - name: Test Windows locks, SQLite, ACLs and ConPTY
+        if: ${{ !inputs.p8_resume }}
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          go test -v ./internal/web -run '^(TestWindows|TestConsole|TestRemoteShellCwd|TestCommandWaitTimeout|TestConversationFinishesWhenCompleted|TestInteractiveStartupHidesBootstrapTrigger)' -count=1 -timeout 3m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -v ./internal/ai -run '^Test(SSHAuthenticationMethodBoundary|StreamCompletion|StreamIdle|Idle|ManualCompaction|CancelIdle|ReloadClears|FirstTurn|OversizedSingle|FailedCompaction|CompactionUses|ToolChildContextFailure|ParentContextFailure)' -count=1 -timeout 1m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./internal/platform -run '^TestSSHFileOption' -count=1 -timeout 1m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./client/windows -skip '^TestWindowsStrategyConfirmationInRealWebView$' -count=1 -timeout 1m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: P8 strategy regression and actual Windows WebView2 acceptance
+        env:
+          LAKE_P8_CHECKS: ${{ inputs.p8_checks }}
+        shell: pwsh
+        run: |
+          if ($env:LAKE_P8_CHECKS -eq 'contracts-ai') {
+            python scripts/verify_strategy_learning.py --report "${{ runner.temp }}/strategy-learning-windows.json" --packages internal/strategy internal/ai
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } elseif ($env:LAKE_P8_CHECKS -ne 'native-ui-only') {
+            python scripts/verify_strategy_learning.py --report "${{ runner.temp }}/strategy-learning-windows.json"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $env:LAKE_P8_REQUIRED_WINDOWS_UI = '1'
+          $env:LAKE_P8_WINDOWS_REPORT = '${{ runner.temp }}/strategy-learning-windows-ui.json'
+          go test -v ./client/windows -run '^TestWindowsStrategyConfirmationInRealWebView$' -count=1 -timeout=2m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strategy-learning-windows-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/strategy-learning-windows.json
+            ${{ runner.temp }}/strategy-learning-windows-ui.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Build installer after native runtime tests
+        run: python scripts/build_lake_windows.py --reuse-web
+      - name: Prepare the actual packaged desktop for SSH tests
+        shell: python
+        run: |
+          import os, pathlib, zipfile
+          version = pathlib.Path('VERSION').read_text().strip()
+          package = pathlib.Path('dist/windows') / version / 'x86_64' / f'Lake-{version}-windows-x86_64.zip'
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'Lake packaged 中文 with spaces'
+          with zipfile.ZipFile(package) as archive:
+              archive.extractall(output)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write('LAKE_TEST_DESKTOP_EXE=' + str(output / 'Lake/Lake.exe') + '\n')
+              env.write('LAKE_PORTABLE_ROOT=' + str(output / 'Lake/resources/git') + '\n')
+      - name: Test packaged desktop credential helper and bundled SSH
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          if (-not $env:LAKE_TEST_DESKTOP_EXE) { throw 'Packaged desktop path is required for this test' }
+          go test -v ./internal/web -run '^TestWindowsPackagedSSHCredentialHelper$' -count=1 -timeout 90s
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Identify branch test packages
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/master'
+        shell: python
+        run: |
+          import json, os, pathlib, subprocess
+          version = pathlib.Path('VERSION').read_text().strip()
+          output = pathlib.Path('dist/windows') / version / 'x86_64'
+          metadata = {
+              'test_only': True,
+              'version': version,
+              'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'pull_request_head': '${{ github.event.pull_request.head.sha }}',
+              'run_url': f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+          }
+          (output / 'test-build.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
+          (output / 'TEST-BUILD.txt').write_text(
+              'Lake Windows x64 TEST BUILD\n'
+              'This artifact is for validation only; it is not a formal release.\n'
+              f'Source: {metadata["source_commit"]}\nRun: {metadata["run_url"]}\n'
+              'The embedded version remains unchanged. Prefer testing the ZIP in a separate folder.\n'
+              'To isolate data, set LAKE_HOME to a dedicated test directory before launching Lake.exe.\n'
+              'Do not run the installer over a production installation unless explicitly intended.\n',
+              encoding='utf-8')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ (github.event_name == 'pull_request' || github.ref != 'refs/heads/master') && format('Lake-windows-x86_64-test-{0}', github.run_id) || 'Lake-windows-x86_64' }}
+          path: dist/windows/*/x86_64/*
+          if-no-files-found: error
+          retention-days: 14

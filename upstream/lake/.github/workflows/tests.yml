@@ -1,0 +1,35 @@
+name: Lake verification
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  workbench:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.ref == 'develop' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.6'
+      - run: pnpm --dir web-agent install --frozen-lockfile
+      - run: pnpm --dir web-agent test:frontend && pnpm --dir web-agent build:web
+      - run: mkdir -p assets/web/dist && cp -R web-agent/web/dist/. assets/web/dist/
+      - run: python3 scripts/check_adk_runtime_boundary.py
+      - run: python3 -m unittest discover -s scripts -p 'test_branch_policy.py'
+      - run: go test -race ./... && go vet ./...
+      - run: swift run --package-path client/macos --build-system native LakeUpdateTests
+      - run: swift run --package-path client/macos --build-system native LakeWindowTests
+      - run: swift build --package-path client/macos --build-system native --product LakeDesktop
+      - run: python3 scripts/test_lake_macos_installer.py
