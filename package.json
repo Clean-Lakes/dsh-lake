@@ -1,0 +1,69 @@
+{
+  "name": "@clean-lakes/dsh-lake",
+  "version": "0.3.3",
+  "description": "将 Lake 主机、@资源标签、审批执行与终端融入 DSH 工作区",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Clean-Lakes/dsh-lake.git"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:client": "node scripts/build-client.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.mjs",
+    "verify:source": "node scripts/verify-source.mjs",
+    "prepack": "node scripts/check-package.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-input-trigger"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "client",
+    "locale",
+    "bin",
+    "docs",
+    "upstream.lock.json",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "upstream/lake/LICENSE-APACHE",
+    "upstream/lake/web-agent/THIRD_PARTY_NOTICES.md",
+    "upstream/lake/web-agent/licenses",
+    "upstream/lake/web-agent/web/public/magpie-LICENSE.txt"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "@xterm/xterm": "5.5.0",
+    "@xterm/addon-fit": "0.10.0"
+  }
+}
