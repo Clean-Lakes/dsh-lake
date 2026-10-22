@@ -1,0 +1,13 @@
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const dir = join(root, 'bin', `${process.platform}-${process.arch}`);
+await access(join(dir, process.platform === 'win32' ? 'lake.exe' : 'lake'));
+const build = JSON.parse(await readFile(join(dir, 'build.json'), 'utf8'));
+const source = JSON.parse(await readFile(join(root, 'upstream.lock.json'), 'utf8'));
+if (build.source.commit !== source.commit) throw new Error('Packaged binary does not match upstream.lock.json');
+const client = JSON.parse(await readFile(join(root, 'client/build.json'), 'utf8'));
+for (const [file, expected] of Object.entries(client.hashes)) if (createHash('sha256').update(await readFile(join(root, file))).digest('hex') !== expected) throw new Error('Native client is stale; run npm run build:client');
+console.log(`Prebuilt executable present: ${build.platform}-${build.arch}, Lake ${source.commit.slice(0, 7)}`);

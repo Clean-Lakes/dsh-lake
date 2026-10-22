@@ -1,0 +1,56 @@
+name: Publish signed Apple Silicon assets
+on:
+  push:
+    tags: ['lake-macos-assets-*']
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.event.deleted == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the prepared release belongs to current master
+        run: |
+          git fetch origin refs/heads/master:refs/remotes/origin/master
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re, subprocess
+          root = pathlib.Path('release-assets/macos')
+          meta = json.loads((root / 'release.json').read_text())
+          version = pathlib.Path('VERSION').read_text().strip()
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
+          assert meta['version'] == version
+          assert meta['commit'] == subprocess.check_output(['git', 'rev-parse', 'origin/master'], text=True).strip()
+          name = f'Lake-{version}-macos-arm64'
+          assert sorted(p.name for p in root.iterdir()) == sorted([name+'.zip', name+'.zip.sha256', name+'.dmg', name+'.dmg.sha256', 'release.json'])
+          for ext in ['zip', 'dmg']:
+              file = root / (name+'.'+ext)
+              expected = (root / (file.name+'.sha256')).read_text().split()
+              assert expected == [hashlib.sha256(file.read_bytes()).hexdigest(), file.name]
+          with open(__import__('os').environ['GITHUB_ENV'], 'a') as out:
+              out.write(f'LAKE_RELEASE_VERSION={version}\nLAKE_RELEASE_COMMIT={meta["commit"]}\n')
+          PY
+      - name: Publish verified packages on master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "v$LAKE_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "v$LAKE_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --target master --draft --title "Lake v$LAKE_RELEASE_VERSION · Apple Silicon" --notes-file client/macos/RELEASE_NOTES.md
+          fi
+          gh release upload "v$LAKE_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --clobber release-assets/macos/*.zip release-assets/macos/*.dmg release-assets/macos/*.sha256
+          # A same-version refresh must point its source tag at the packaged master commit.
+          # Fast-forward only, so unrelated tag changes cannot be overwritten.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/v$LAKE_RELEASE_VERSION" -f sha="$LAKE_RELEASE_COMMIT" -F force=false
+          gh release edit "v$LAKE_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --target master --draft=false --latest --notes-file client/macos/RELEASE_NOTES.md
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$LAKE_RELEASE_VERSION" > /tmp/lake-published.json
+          python3 - <<'PY'
+          import json, pathlib
+          r = json.loads(pathlib.Path('/tmp/lake-published.json').read_text())
+          assert r['target_commitish'] == 'master' and not r['draft'] and not r['prerelease']
+          assert len(r['assets']) == 4
+          for a in r['assets']:
+              assert a['size'] == (pathlib.Path('release-assets/macos') / a['name']).stat().st_size
+          print('Published master release with four verified Apple Silicon assets')
+          PY
+          # Only a temporary asset tag is used; no release branches or PR banners are created.
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME"

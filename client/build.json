@@ -1,0 +1,15 @@
+{
+  "hostSDK": "0.2.1-rc.2",
+  "hashes": {
+    "client/src/index.jsx": "a0924a302730f8bffff0eac35ac87694ffef337bc21a70420ad2d99ac1474b64",
+    "client/src/components.jsx": "9f434d84c076781ce2f1bf713b53efd369b641558acc46fa47b548d28928a338",
+    "client/src/api.js": "53a5c40a599b9baddc502dcfb0011b9bdd98b163915a5a63fea617f18089905b",
+    "client/src/state.js": "ecb8add751c47ac31dfef19501fd36b1cfee13451361832efc842e0d38be7052",
+    "client/src/references.js": "e8e91c358f42c64443846463930a1fc7a72cf32aef241568d2e3e11534f6479d",
+    "client/src/resource-tree.js": "de2f52dc1fe6dfde2955238f6b77383a512a497c2d3c2277401001e3e420f292",
+    "client/src/management.jsx": "6f66aac70bb3f490c789b4efeee63b11c5c2aa96faa6797823f48402b9395ee4",
+    "client/src/styles.css": "e3e535626e61ef7ba5c67cc644c09feedae684ecf511361a7130f3b61bb33e3b",
+    "scripts/build-client.mjs": "b57cc21c377a562582ece3a49574e842beb9d5b671bdade498d98580e15ac594",
+    "client/client.js": "9d73a7513e517f3c06b081367639c94687223c4844529a0b6827d75cb00041e1"
+  }
+}
